@@ -41,6 +41,7 @@ func New(d Deps) *gin.Engine {
 
 	tasks := r.Group("/tasks", middleware.Auth(d.TokenParser))
 	tasks.POST("", d.Task.Create)
+	tasks.GET("", d.Task.List)
 	tasks.GET("/:id", d.Task.Get)
 	tasks.PUT("/:id", d.Task.Update)
 	tasks.DELETE("/:id", d.Task.Delete)

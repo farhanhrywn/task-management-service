@@ -70,7 +70,10 @@ func run(log *slog.Logger) error {
 		Logger:      log,
 		TokenParser: jwtManager,
 		Auth:        handler.NewAuthHandler(authSvc, jwtManager.TTL()),
-		Task:        handler.NewTaskHandler(taskSvc),
+		Task: handler.NewTaskHandler(taskSvc, handler.Pagination{
+			DefaultLimit: cfg.Pagination.DefaultLimit,
+			MaxLimit:     cfg.Pagination.MaxLimit,
+		}),
 	})
 
 	srv := &http.Server{

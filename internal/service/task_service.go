@@ -75,6 +75,33 @@ func (s *TaskService) Delete(ctx context.Context, actor domain.Actor, id uuid.UU
 	return nil
 }
 
+type ListInput struct {
+	Status domain.TaskStatus
+	Search string
+	Page   int
+	Limit  int
+}
+
+// List returns the caller's tasks, or every task for the super admin,
+// newest first.
+func (s *TaskService) List(ctx context.Context, actor domain.Actor, in ListInput) ([]domain.Task, int64, error) {
+	filter := repository.TaskFilter{
+		Status: in.Status,
+		Search: strings.TrimSpace(in.Search),
+		Page:   in.Page,
+		Limit:  in.Limit,
+	}
+	if !actor.IsSuperAdmin() {
+		filter.OwnerID = &actor.UserID
+	}
+
+	tasks, total, err := s.tasks.List(ctx, filter)
+	if err != nil {
+		return nil, 0, apperror.Internal(err)
+	}
+	return tasks, total, nil
+}
+
 // findAccessible applies the access rule: missing or deleted → 404,
 // not owner and not super admin → 403.
 func (s *TaskService) findAccessible(ctx context.Context, actor domain.Actor, id uuid.UUID) (*domain.Task, error) {

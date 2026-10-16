@@ -19,6 +19,15 @@ type UpdateTaskRequest struct {
 	Status      string  `json:"status" binding:"required,oneof=todo in_progress done"`
 }
 
+// ListTasksQuery binds GET /tasks query params. Page and Limit are pointers so
+// an explicit 0 is rejected instead of being treated as "not provided".
+type ListTasksQuery struct {
+	Status string `form:"status" binding:"omitempty,oneof=todo in_progress done"`
+	Search string `form:"search" binding:"max=255"`
+	Page   *int   `form:"page" binding:"omitempty,min=1,max=1000000"`
+	Limit  *int   `form:"limit" binding:"omitempty,min=1"`
+}
+
 type TaskResponse struct {
 	ID          string  `json:"id"`
 	UserID      string  `json:"user_id"`
