@@ -63,10 +63,12 @@ func run(log *slog.Logger) error {
 	userRepo := repository.NewUserRepository(db)
 	taskRepo := repository.NewTaskRepository(db)
 	idemRepo := repository.NewIdempotencyRepository(db, cfg.Idem.WaitTimeout)
+	teamRepo := repository.NewTeamRepository(db)
 	txManager := repository.NewTxManager(db)
 
 	authSvc := service.NewAuthService(userRepo, jwtManager, bcrypt.DefaultCost)
 	taskSvc := service.NewTaskService(taskRepo, clk)
+	teamSvc := service.NewTeamService(teamRepo, userRepo, clk)
 	idemSvc := service.NewIdempotencyService(txManager, idemRepo, taskRepo, clk, service.IdempotencyConfig{
 		TTL:          cfg.Idem.TTL,
 		WaitTimeout:  cfg.Idem.WaitTimeout,
@@ -81,6 +83,7 @@ func run(log *slog.Logger) error {
 			DefaultLimit: cfg.Pagination.DefaultLimit,
 			MaxLimit:     cfg.Pagination.MaxLimit,
 		}),
+		Team: handler.NewTeamHandler(teamSvc),
 	})
 
 	srv := &http.Server{

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/farhanhrywn/task-management-service/internal/domain"
 	"github.com/farhanhrywn/task-management-service/internal/handler"
 	"github.com/farhanhrywn/task-management-service/internal/middleware"
 	"github.com/farhanhrywn/task-management-service/pkg/apperror"
@@ -16,6 +17,7 @@ type Deps struct {
 	TokenParser middleware.TokenParser
 	Auth        *handler.AuthHandler
 	Task        *handler.TaskHandler
+	Team        *handler.TeamHandler
 }
 
 func New(d Deps) *gin.Engine {
@@ -45,6 +47,14 @@ func New(d Deps) *gin.Engine {
 	tasks.GET("/:id", d.Task.Get)
 	tasks.PUT("/:id", d.Task.Update)
 	tasks.DELETE("/:id", d.Task.Delete)
+
+	superAdmin := middleware.RequireRole(domain.RoleSuperAdmin)
+
+	teams := r.Group("/teams", middleware.Auth(d.TokenParser))
+	teams.GET("", d.Team.List)
+	teams.GET("/:id/members", d.Team.ListMembers)
+	teams.POST("/:id/members", superAdmin, d.Team.AddMember)
+	teams.DELETE("/:id/members/:userId", superAdmin, d.Team.RemoveMember)
 
 	return r
 }
