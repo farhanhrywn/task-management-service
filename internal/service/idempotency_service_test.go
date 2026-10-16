@@ -3,8 +3,10 @@ package service_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 
 	"github.com/farhanhrywn/task-management-service/internal/domain"
 	"github.com/farhanhrywn/task-management-service/internal/service"
+	"github.com/farhanhrywn/task-management-service/pkg/apperror"
 	"github.com/farhanhrywn/task-management-service/test/mocks"
 )
 
@@ -124,6 +127,161 @@ func TestCreateTask_ConcurrentDuplicates_CreateExactlyOneTask(t *testing.T) {
 	}
 	if created != 1 {
 		t.Fatalf("non-replayed responses = %d, want exactly 1", created)
+	}
+	if got := f.tasks.Count(); got != 1 {
+		t.Fatalf("task count = %d, want 1", got)
+	}
+}
+
+// UT-03: same key with a different body replays the first response.
+func TestCreateTask_SameKeyDifferentBody_ReplaysFirstResponse(t *testing.T) {
+	f := newIdemFixture(t, service.IdempotencyConfig{})
+	ctx := context.Background()
+	userID, key := uuid.New(), uuid.New()
+
+	first, _, err := f.svc.CreateTask(ctx, userID, key, input("First title"))
+	if err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	second, replayed, err := f.svc.CreateTask(ctx, userID, key, input("Completely different"))
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+	if !replayed || !bytes.Equal(first.Body, second.Body) {
+		t.Fatalf("want replay of the first body, got replayed=%v body=%s", replayed, second.Body)
+	}
+	if !bytes.Contains(second.Body, []byte(`"First title"`)) {
+		t.Fatalf("replayed body should carry the first title: %s", second.Body)
+	}
+	if got := f.tasks.Count(); got != 1 {
+		t.Fatalf("task count = %d, want 1", got)
+	}
+}
+
+// UT-04: keys are scoped per user.
+func TestCreateTask_SameKeyDifferentUsers_CreatesTwoTasks(t *testing.T) {
+	f := newIdemFixture(t, service.IdempotencyConfig{})
+	ctx := context.Background()
+	key := uuid.New()
+
+	for _, user := range []uuid.UUID{uuid.New(), uuid.New()} {
+		_, replayed, err := f.svc.CreateTask(ctx, user, key, input("Same key"))
+		if err != nil {
+			t.Fatalf("user %s: %v", user, err)
+		}
+		if replayed {
+			t.Fatalf("user %s: a key from another user must not be replayed", user)
+		}
+	}
+	if got := f.tasks.Count(); got != 2 {
+		t.Fatalf("task count = %d, want 2", got)
+	}
+}
+
+// UT-05: a key older than the 24h window is treated as new.
+func TestCreateTask_ExpiredKey_CreatesNewTask(t *testing.T) {
+	f := newIdemFixture(t, service.IdempotencyConfig{TTL: 24 * time.Hour})
+	ctx := context.Background()
+	userID, key := uuid.New(), uuid.New()
+
+	first, _, err := f.svc.CreateTask(ctx, userID, key, input("Day one"))
+	if err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+
+	f.clock.Advance(23*time.Hour + 59*time.Minute)
+	if _, replayed, err := f.svc.CreateTask(ctx, userID, key, input("Day one")); err != nil || !replayed {
+		t.Fatalf("within the window: want replay, got replayed=%v err=%v", replayed, err)
+	}
+
+	f.clock.Advance(time.Minute) // exactly 24h after the first request
+	second, replayed, err := f.svc.CreateTask(ctx, userID, key, input("Day two"))
+	if err != nil {
+		t.Fatalf("after expiry: %v", err)
+	}
+	if replayed || bytes.Equal(first.Body, second.Body) {
+		t.Fatal("after expiry: want a fresh response, got a replay")
+	}
+	if got := f.tasks.Count(); got != 2 {
+		t.Fatalf("task count = %d, want 2", got)
+	}
+}
+
+// UT-06: a failure inside the transaction rolls the key back so a retry works.
+func TestCreateTask_InsertFails_KeyRolledBackAndRetrySucceeds(t *testing.T) {
+	f := newIdemFixture(t, service.IdempotencyConfig{})
+	ctx := context.Background()
+	userID, key := uuid.New(), uuid.New()
+
+	var calls atomic.Int32
+	f.tasks.BeforeCreate = func(context.Context, *domain.Task) error {
+		if calls.Add(1) == 1 {
+			return errors.New("connection reset")
+		}
+		return nil
+	}
+
+	_, _, err := f.svc.CreateTask(ctx, userID, key, input("Flaky"))
+	if !apperror.Is(err, apperror.CodeInternal) {
+		t.Fatalf("first request: want INTERNAL_ERROR, got %v", err)
+	}
+	if got := f.tasks.Count(); got != 0 {
+		t.Fatalf("after failure: task count = %d, want 0", got)
+	}
+
+	resp, replayed, err := f.svc.CreateTask(ctx, userID, key, input("Flaky"))
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if replayed || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("retry: want a fresh 201, got status=%d replayed=%v", resp.StatusCode, replayed)
+	}
+	if got := f.tasks.Count(); got != 1 {
+		t.Fatalf("after retry: task count = %d, want 1", got)
+	}
+}
+
+// UT-07: a duplicate that waits longer than WaitTimeout gets 409.
+func TestCreateTask_FirstRequestTooSlow_DuplicateGets409(t *testing.T) {
+	f := newIdemFixture(t, service.IdempotencyConfig{WaitTimeout: 100 * time.Millisecond})
+	ctx := context.Background()
+	userID, key := uuid.New(), uuid.New()
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.tasks.BeforeCreate = func(context.Context, *domain.Task) error {
+		once.Do(func() { close(entered) })
+		<-release
+		return nil
+	}
+
+	type result struct {
+		resp domain.StoredResponse
+		err  error
+	}
+	firstDone := make(chan result, 1)
+	go func() {
+		resp, _, err := f.svc.CreateTask(ctx, userID, key, input("Slow"))
+		firstDone <- result{resp, err}
+	}()
+	<-entered
+
+	start := time.Now()
+	_, _, err := f.svc.CreateTask(ctx, userID, key, input("Slow"))
+	if !apperror.Is(err, apperror.CodeIdempotencyInProgress) {
+		t.Fatalf("duplicate: want IDEMPOTENCY_IN_PROGRESS, got %v", err)
+	}
+	if waited := time.Since(start); waited < 100*time.Millisecond {
+		t.Fatalf("duplicate returned after %v, before the wait timeout", waited)
+	}
+
+	close(release)
+	first := <-firstDone
+	if first.err != nil || first.resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first request: want 201, got %d err=%v", first.resp.StatusCode, first.err)
+	}
+	if _, replayed, err := f.svc.CreateTask(ctx, userID, key, input("Slow")); err != nil || !replayed {
+		t.Fatalf("after completion: want replay, got replayed=%v err=%v", replayed, err)
 	}
 	if got := f.tasks.Count(); got != 1 {
 		t.Fatalf("task count = %d, want 1", got)

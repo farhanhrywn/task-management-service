@@ -96,10 +96,23 @@ thread-safe in-memory fake in [`test/mocks`](test/mocks).
 go test ./... -race -count=20
 ```
 
-| ID | Scenario | Where |
+| ID | Scenario | Test |
 |---|---|---|
-| UT-01 | Sequential duplicate key → identical response, 1 task | `internal/service/idempotency_service_test.go` |
-| UT-02 | 100 concurrent goroutines, same key → 1 task, identical responses, race-free | `internal/service/idempotency_service_test.go` |
+| UT-01 | Sequential duplicate key → identical response, 1 task | `TestCreateTask_SequentialDuplicate_ReplaysFirstResponse` |
+| UT-02 | 100 concurrent goroutines, same key → 1 task, identical responses, race-free | `TestCreateTask_ConcurrentDuplicates_CreateExactlyOneTask` |
+| UT-03 | Same key, different body → first response replayed | `TestCreateTask_SameKeyDifferentBody_ReplaysFirstResponse` |
+| UT-04 | Same key, different users → 2 tasks | `TestCreateTask_SameKeyDifferentUsers_CreatesTwoTasks` |
+| UT-05 | Key older than 24h (fake clock) → new task | `TestCreateTask_ExpiredKey_CreatesNewTask` |
+| UT-06 | Task insert fails mid-transaction → key rolled back, retry succeeds | `TestCreateTask_InsertFails_KeyRolledBackAndRetrySucceeds` |
+| UT-07 | First request exceeds the wait timeout → 409 `IDEMPOTENCY_IN_PROGRESS` | `TestCreateTask_FirstRequestTooSlow_DuplicateGets409` |
+| UT-08 | Assign with failing notifier → assignee and task log rolled back | `TestAssign_NotifierFails_RollsBackEverything` |
+| UT-09 | Assign outside owner's teams / same assignee → 422 / 409 | `TestAssign_ValidationErrors` |
+| UT-10 | Access another user's task → 403 | `TestTaskAccess_OtherUserIsForbidden` |
+| UT-11 | Wrong login → 401; expired / forged / alg-none token → 401 | `TestLogin`, `TestAuth` |
+| UT-12 | Panic in handler → 500 JSON without stack trace, stack in log | `TestRecovery_PanicReturns500WithoutStackTrace` |
+
+Service tests live in `internal/service/*_test.go`; middleware tests in
+`internal/middleware/middleware_test.go`.
 
 ---
 
