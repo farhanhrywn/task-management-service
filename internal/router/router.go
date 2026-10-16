@@ -21,6 +21,7 @@ func New(d Deps) *gin.Engine {
 
 	r.Use(
 		middleware.RequestID(d.Logger),
+		middleware.Logger(),
 		middleware.Recovery(),
 		middleware.ErrorHandler(),
 	)
