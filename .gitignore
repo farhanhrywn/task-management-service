@@ -1,0 +1,21 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+/bin/
+/tmp/
+*.exe
+*.test
+*.out
+coverage.*
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local tooling
+.claude/settings.local.json
