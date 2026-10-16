@@ -19,7 +19,7 @@ var (
 )
 
 const (
-	pgUniqueViolation = "23505"
+	pgUniqueViolation  = "23505"
 	pgLockNotAvailable = "55P03"
 )
 
