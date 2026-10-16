@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,8 +16,11 @@ import (
 	"github.com/farhanhrywn/task-management-service/pkg/response"
 )
 
+type TaskCreator interface {
+	CreateTask(ctx context.Context, ownerID, key uuid.UUID, in service.TaskInput) (domain.StoredResponse, bool, error)
+}
+
 type TaskService interface {
-	Create(ctx context.Context, ownerID uuid.UUID, in service.TaskInput) (*domain.Task, error)
 	Get(ctx context.Context, actor domain.Actor, id uuid.UUID) (*domain.Task, error)
 	Update(ctx context.Context, actor domain.Actor, id uuid.UUID, in service.TaskInput) (*domain.Task, error)
 	Delete(ctx context.Context, actor domain.Actor, id uuid.UUID) error
@@ -28,24 +32,37 @@ type Pagination struct {
 	MaxLimit     int
 }
 
+const (
+	HeaderIdempotencyKey     = "Idempotency-Key"
+	HeaderIdempotentReplayed = "Idempotent-Replayed"
+	canonicalUUIDLength      = 36
+)
+
 type TaskHandler struct {
+	creator    TaskCreator
 	tasks      TaskService
 	pagination Pagination
 }
 
-func NewTaskHandler(tasks TaskService, pagination Pagination) *TaskHandler {
-	return &TaskHandler{tasks: tasks, pagination: pagination}
+func NewTaskHandler(creator TaskCreator, tasks TaskService, pagination Pagination) *TaskHandler {
+	return &TaskHandler{creator: creator, tasks: tasks, pagination: pagination}
 }
 
-// Create handles POST /tasks.
+// Create handles POST /tasks. The Idempotency-Key header is mandatory; a
+// repeated key replays the first response byte for byte.
 func (h *TaskHandler) Create(c *gin.Context) {
+	key, err := parseIdempotencyKey(c.GetHeader(HeaderIdempotencyKey))
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
 	var req dto.CreateTaskRequest
 	if err := bindJSON(c, &req); err != nil {
 		_ = c.Error(err)
 		return
 	}
 
-	task, err := h.tasks.Create(c.Request.Context(), currentActor(c).UserID, service.TaskInput{
+	resp, replayed, err := h.creator.CreateTask(c.Request.Context(), currentActor(c).UserID, key, service.TaskInput{
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      domain.TaskStatus(req.Status),
@@ -54,7 +71,23 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
-	response.Data(c, http.StatusCreated, dto.NewTaskResponse(task))
+	if replayed {
+		c.Header(HeaderIdempotentReplayed, "true")
+	}
+	response.Raw(c, resp.StatusCode, resp.Body)
+}
+
+// parseIdempotencyKey accepts only the canonical 8-4-4-4-12 UUID form.
+func parseIdempotencyKey(raw string) (uuid.UUID, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return uuid.Nil, apperror.IdempotencyKeyMissing()
+	}
+	key, err := uuid.Parse(raw)
+	if err != nil || len(raw) != canonicalUUIDLength || key == uuid.Nil {
+		return uuid.Nil, apperror.IdempotencyKeyInvalid()
+	}
+	return key, nil
 }
 
 // List handles GET /tasks?status=&search=&page=&limit=.

@@ -20,6 +20,8 @@ type TaskInput struct {
 	Status      domain.TaskStatus
 }
 
+// TaskService handles reads, updates and deletes. Creation goes through
+// IdempotencyService.
 type TaskService struct {
 	tasks repository.TaskRepository
 	clock clock.Clock
@@ -27,14 +29,6 @@ type TaskService struct {
 
 func NewTaskService(tasks repository.TaskRepository, clk clock.Clock) *TaskService {
 	return &TaskService{tasks: tasks, clock: clk}
-}
-
-func (s *TaskService) Create(ctx context.Context, ownerID uuid.UUID, in TaskInput) (*domain.Task, error) {
-	task := NewTask(ownerID, in, s.clock.Now())
-	if err := s.tasks.Create(ctx, task); err != nil {
-		return nil, apperror.Internal(err)
-	}
-	return task, nil
 }
 
 func (s *TaskService) Get(ctx context.Context, actor domain.Actor, id uuid.UUID) (*domain.Task, error) {

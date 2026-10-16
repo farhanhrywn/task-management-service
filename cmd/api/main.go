@@ -62,15 +62,22 @@ func run(log *slog.Logger) error {
 
 	userRepo := repository.NewUserRepository(db)
 	taskRepo := repository.NewTaskRepository(db)
+	idemRepo := repository.NewIdempotencyRepository(db, cfg.Idem.WaitTimeout)
+	txManager := repository.NewTxManager(db)
 
 	authSvc := service.NewAuthService(userRepo, jwtManager, bcrypt.DefaultCost)
 	taskSvc := service.NewTaskService(taskRepo, clk)
+	idemSvc := service.NewIdempotencyService(txManager, idemRepo, taskRepo, clk, service.IdempotencyConfig{
+		TTL:          cfg.Idem.TTL,
+		WaitTimeout:  cfg.Idem.WaitTimeout,
+		PollInterval: cfg.Idem.PollInterval,
+	})
 
 	engine := router.New(router.Deps{
 		Logger:      log,
 		TokenParser: jwtManager,
 		Auth:        handler.NewAuthHandler(authSvc, jwtManager.TTL()),
-		Task: handler.NewTaskHandler(taskSvc, handler.Pagination{
+		Task: handler.NewTaskHandler(idemSvc, taskSvc, handler.Pagination{
 			DefaultLimit: cfg.Pagination.DefaultLimit,
 			MaxLimit:     cfg.Pagination.MaxLimit,
 		}),
