@@ -11,10 +11,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/farhanhrywn/task-management-service/internal/config"
 	"github.com/farhanhrywn/task-management-service/internal/database"
+	"github.com/farhanhrywn/task-management-service/internal/handler"
+	"github.com/farhanhrywn/task-management-service/internal/repository"
 	"github.com/farhanhrywn/task-management-service/internal/router"
+	"github.com/farhanhrywn/task-management-service/internal/service"
+	"github.com/farhanhrywn/task-management-service/pkg/clock"
+	"github.com/farhanhrywn/task-management-service/pkg/jwtutil"
 	"github.com/farhanhrywn/task-management-service/pkg/logger"
 )
 
@@ -51,7 +57,18 @@ func run(log *slog.Logger) error {
 	}
 	log.Info("database ready")
 
-	engine := router.New(router.Deps{Logger: log})
+	clk := clock.Real{}
+	jwtManager := jwtutil.NewManager(cfg.JWT.Secret, cfg.JWT.ExpiresIn, clk)
+
+	userRepo := repository.NewUserRepository(db)
+
+	authSvc := service.NewAuthService(userRepo, jwtManager, bcrypt.DefaultCost)
+
+	engine := router.New(router.Deps{
+		Logger:      log,
+		TokenParser: jwtManager,
+		Auth:        handler.NewAuthHandler(authSvc, jwtManager.TTL()),
+	})
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.AppPort,
