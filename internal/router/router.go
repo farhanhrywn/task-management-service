@@ -15,6 +15,7 @@ type Deps struct {
 	Logger      *slog.Logger
 	TokenParser middleware.TokenParser
 	Auth        *handler.AuthHandler
+	Task        *handler.TaskHandler
 }
 
 func New(d Deps) *gin.Engine {
@@ -37,6 +38,12 @@ func New(d Deps) *gin.Engine {
 	auth := r.Group("/auth")
 	auth.POST("/register", d.Auth.Register)
 	auth.POST("/login", d.Auth.Login)
+
+	tasks := r.Group("/tasks", middleware.Auth(d.TokenParser))
+	tasks.POST("", d.Task.Create)
+	tasks.GET("/:id", d.Task.Get)
+	tasks.PUT("/:id", d.Task.Update)
+	tasks.DELETE("/:id", d.Task.Delete)
 
 	return r
 }

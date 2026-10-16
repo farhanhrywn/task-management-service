@@ -61,13 +61,16 @@ func run(log *slog.Logger) error {
 	jwtManager := jwtutil.NewManager(cfg.JWT.Secret, cfg.JWT.ExpiresIn, clk)
 
 	userRepo := repository.NewUserRepository(db)
+	taskRepo := repository.NewTaskRepository(db)
 
 	authSvc := service.NewAuthService(userRepo, jwtManager, bcrypt.DefaultCost)
+	taskSvc := service.NewTaskService(taskRepo, clk)
 
 	engine := router.New(router.Deps{
 		Logger:      log,
 		TokenParser: jwtManager,
 		Auth:        handler.NewAuthHandler(authSvc, jwtManager.TTL()),
+		Task:        handler.NewTaskHandler(taskSvc),
 	})
 
 	srv := &http.Server{

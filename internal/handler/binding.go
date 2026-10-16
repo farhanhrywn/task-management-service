@@ -128,15 +128,8 @@ func parseID(c *gin.Context, name string) (uuid.UUID, error) {
 	return id, nil
 }
 
-// Principal is the authenticated caller set by the Auth middleware.
-type Principal struct {
-	UserID uuid.UUID
-	Role   domain.Role
-}
-
-func (p Principal) IsSuperAdmin() bool { return p.Role == domain.RoleSuperAdmin }
-
-func currentPrincipal(c *gin.Context) Principal {
+// currentActor returns the caller set by the Auth middleware.
+func currentActor(c *gin.Context) domain.Actor {
 	id, _ := uuid.Parse(c.GetString(ctxkey.UserID))
-	return Principal{UserID: id, Role: domain.Role(c.GetString(ctxkey.Role))}
+	return domain.Actor{UserID: id, Role: domain.Role(c.GetString(ctxkey.Role))}
 }
