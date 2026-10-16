@@ -27,6 +27,10 @@ type TaskService interface {
 	List(ctx context.Context, actor domain.Actor, in service.ListInput) ([]domain.Task, int64, error)
 }
 
+type TaskAssigner interface {
+	Assign(ctx context.Context, taskID, assigneeID, actorID uuid.UUID) (*domain.Task, error)
+}
+
 type Pagination struct {
 	DefaultLimit int
 	MaxLimit     int
@@ -41,11 +45,12 @@ const (
 type TaskHandler struct {
 	creator    TaskCreator
 	tasks      TaskService
+	assigner   TaskAssigner
 	pagination Pagination
 }
 
-func NewTaskHandler(creator TaskCreator, tasks TaskService, pagination Pagination) *TaskHandler {
-	return &TaskHandler{creator: creator, tasks: tasks, pagination: pagination}
+func NewTaskHandler(creator TaskCreator, tasks TaskService, assigner TaskAssigner, pagination Pagination) *TaskHandler {
+	return &TaskHandler{creator: creator, tasks: tasks, assigner: assigner, pagination: pagination}
 }
 
 // Create handles POST /tasks. The Idempotency-Key header is mandatory; a
@@ -190,4 +195,25 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 		return
 	}
 	response.Message(c, http.StatusOK, "task deleted")
+}
+
+// Assign handles POST /tasks/:id/assign (super admin only).
+func (h *TaskHandler) Assign(c *gin.Context) {
+	id, err := parseID(c, "id")
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	var req dto.AssignTaskRequest
+	if err := bindJSON(c, &req); err != nil {
+		_ = c.Error(err)
+		return
+	}
+
+	task, err := h.assigner.Assign(c.Request.Context(), id, uuid.MustParse(req.AssigneeID), currentActor(c).UserID)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	response.Data(c, http.StatusOK, dto.NewTaskResponse(task))
 }

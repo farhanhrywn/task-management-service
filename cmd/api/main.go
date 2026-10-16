@@ -16,6 +16,7 @@ import (
 	"github.com/farhanhrywn/task-management-service/internal/config"
 	"github.com/farhanhrywn/task-management-service/internal/database"
 	"github.com/farhanhrywn/task-management-service/internal/handler"
+	"github.com/farhanhrywn/task-management-service/internal/notifier"
 	"github.com/farhanhrywn/task-management-service/internal/repository"
 	"github.com/farhanhrywn/task-management-service/internal/router"
 	"github.com/farhanhrywn/task-management-service/internal/service"
@@ -64,11 +65,13 @@ func run(log *slog.Logger) error {
 	taskRepo := repository.NewTaskRepository(db)
 	idemRepo := repository.NewIdempotencyRepository(db, cfg.Idem.WaitTimeout)
 	teamRepo := repository.NewTeamRepository(db)
+	taskLogRepo := repository.NewTaskLogRepository(db)
 	txManager := repository.NewTxManager(db)
 
 	authSvc := service.NewAuthService(userRepo, jwtManager, bcrypt.DefaultCost)
 	taskSvc := service.NewTaskService(taskRepo, clk)
 	teamSvc := service.NewTeamService(teamRepo, userRepo, clk)
+	assignSvc := service.NewAssignService(txManager, taskRepo, userRepo, teamRepo, taskLogRepo, notifier.NewLogNotifier(), clk)
 	idemSvc := service.NewIdempotencyService(txManager, idemRepo, taskRepo, clk, service.IdempotencyConfig{
 		TTL:          cfg.Idem.TTL,
 		WaitTimeout:  cfg.Idem.WaitTimeout,
@@ -79,7 +82,7 @@ func run(log *slog.Logger) error {
 		Logger:      log,
 		TokenParser: jwtManager,
 		Auth:        handler.NewAuthHandler(authSvc, jwtManager.TTL()),
-		Task: handler.NewTaskHandler(idemSvc, taskSvc, handler.Pagination{
+		Task: handler.NewTaskHandler(idemSvc, taskSvc, assignSvc, handler.Pagination{
 			DefaultLimit: cfg.Pagination.DefaultLimit,
 			MaxLimit:     cfg.Pagination.MaxLimit,
 		}),

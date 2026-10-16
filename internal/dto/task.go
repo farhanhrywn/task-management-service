@@ -28,6 +28,10 @@ type ListTasksQuery struct {
 	Limit  *int   `form:"limit" binding:"omitempty,min=1"`
 }
 
+type AssignTaskRequest struct {
+	AssigneeID string `json:"assignee_id" binding:"required,uuid"`
+}
+
 type TaskResponse struct {
 	ID          string  `json:"id"`
 	UserID      string  `json:"user_id"`

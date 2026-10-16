@@ -16,6 +16,9 @@ type TeamRepository interface {
 	// AddMember returns ErrDuplicate when the user is already a member.
 	AddMember(ctx context.Context, m *domain.TeamMember) error
 	RemoveMember(ctx context.Context, teamID, userID uuid.UUID) (removed bool, err error)
+	// ShareTeam reports whether both users belong to at least one common team.
+	// For userA == userB it is true when the user is in any team.
+	ShareTeam(ctx context.Context, userA, userB uuid.UUID) (bool, error)
 }
 
 type teamRepository struct {
@@ -70,4 +73,19 @@ func (r *teamRepository) RemoveMember(ctx context.Context, teamID, userID uuid.U
 		return false, translate(res.Error)
 	}
 	return res.RowsAffected > 0, nil
+}
+
+func (r *teamRepository) ShareTeam(ctx context.Context, userA, userB uuid.UUID) (bool, error) {
+	var shared bool
+	err := dbFrom(ctx, r.db).Raw(`
+		SELECT EXISTS (
+			SELECT 1
+			  FROM team_members a
+			  JOIN team_members b ON a.team_id = b.team_id
+			 WHERE a.user_id = ? AND b.user_id = ?
+		)`, userA, userB).Scan(&shared).Error
+	if err != nil {
+		return false, translate(err)
+	}
+	return shared, nil
 }

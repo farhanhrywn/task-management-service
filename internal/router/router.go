@@ -41,14 +41,15 @@ func New(d Deps) *gin.Engine {
 	auth.POST("/register", d.Auth.Register)
 	auth.POST("/login", d.Auth.Login)
 
+	superAdmin := middleware.RequireRole(domain.RoleSuperAdmin)
+
 	tasks := r.Group("/tasks", middleware.Auth(d.TokenParser))
 	tasks.POST("", d.Task.Create)
 	tasks.GET("", d.Task.List)
 	tasks.GET("/:id", d.Task.Get)
 	tasks.PUT("/:id", d.Task.Update)
 	tasks.DELETE("/:id", d.Task.Delete)
-
-	superAdmin := middleware.RequireRole(domain.RoleSuperAdmin)
+	tasks.POST("/:id/assign", superAdmin, d.Task.Assign)
 
 	teams := r.Group("/teams", middleware.Auth(d.TokenParser))
 	teams.GET("", d.Team.List)

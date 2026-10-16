@@ -83,6 +83,18 @@ func (r *InMemoryTaskRepo) FindByID(_ context.Context, id uuid.UUID) (*domain.Ta
 	return &t, nil
 }
 
+// FindByIDForUpdate behaves like FindByID; tests drive one assignment at a time.
+func (r *InMemoryTaskRepo) FindByIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.Task, error) {
+	return r.FindByID(ctx, id)
+}
+
+func (r *InMemoryTaskRepo) UpdateAssignee(ctx context.Context, id, assigneeID uuid.UUID, updatedAt time.Time) error {
+	return r.mutate(ctx, id, func(cur *domain.Task) {
+		cur.AssigneeID = &assigneeID
+		cur.UpdatedAt = updatedAt
+	})
+}
+
 func (r *InMemoryTaskRepo) Update(ctx context.Context, t *domain.Task) error {
 	return r.mutate(ctx, t.ID, func(cur *domain.Task) {
 		cur.Title = t.Title

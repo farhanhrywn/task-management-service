@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/farhanhrywn/task-management-service/internal/domain"
 )
@@ -16,6 +18,9 @@ type TaskRepository interface {
 	Update(ctx context.Context, t *domain.Task) error
 	SoftDelete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, f TaskFilter) ([]domain.Task, int64, error)
+	// FindByIDForUpdate locks the row (SELECT ... FOR UPDATE); call it inside a transaction.
+	FindByIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.Task, error)
+	UpdateAssignee(ctx context.Context, id, assigneeID uuid.UUID, updatedAt time.Time) error
 }
 
 // TaskFilter narrows GET /tasks. OwnerID nil means every owner (super admin).
@@ -46,6 +51,31 @@ func (r *taskRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Ta
 		return nil, translate(err)
 	}
 	return &t, nil
+}
+
+func (r *taskRepository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.Task, error) {
+	var t domain.Task
+	err := dbFrom(ctx, r.db).
+		Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate}).
+		Where("id = ?", id).
+		Take(&t).Error
+	if err != nil {
+		return nil, translate(err)
+	}
+	return &t, nil
+}
+
+func (r *taskRepository) UpdateAssignee(ctx context.Context, id, assigneeID uuid.UUID, updatedAt time.Time) error {
+	res := dbFrom(ctx, r.db).Model(&domain.Task{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"assignee_id": assigneeID, "updated_at": updatedAt})
+	if res.Error != nil {
+		return translate(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Update persists the client-editable fields only. assignee_id and user_id
